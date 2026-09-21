@@ -1,0 +1,800 @@
+openapi: 3.1.0
+info:
+  title: CoinClock API
+  version: 1.0.0
+  license:
+    name: Internal design baseline
+    identifier: LicenseRef-Internal-Design-Baseline
+  description: |
+    CoinClock price-alert, notification, entitlement and non-custodial trading API.
+    This contract is a design baseline. External venue and chain schemas must be
+    finalized before production trading is enabled.
+servers:
+  - url: https://api.coinclock.invalid
+    description: Production placeholder
+  - url: https://staging-api.coinclock.invalid
+    description: Staging placeholder
+security:
+  - bearerAuth: []
+tags:
+  - name: Markets
+    description: Normalized quotes, candles and WebSocket subscriptions
+  - name: Alerts
+    description: User-owned price alert rules and state transitions
+  - name: Devices
+    description: Installations and notification endpoints
+  - name: Entitlements
+    description: Fee tiers, service credits and on-chain payment verification
+  - name: AI
+    description: Versioned analyst runs and reports
+  - name: Trading
+    description: Wallet verification and non-custodial order intents
+paths:
+  /v1/markets/quotes:
+    get:
+      operationId: get_v1_markets_quotes
+      tags: [Markets]
+      summary: Get latest normalized quotes
+      parameters:
+        - $ref: '#/components/parameters/InstrumentIds'
+        - name: price_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [LAST, MARK, INDEX]
+            default: LAST
+      responses:
+        '200':
+          description: Latest quotes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /v1/alerts:
+    get:
+      operationId: get_v1_alerts
+      tags: [Alerts]
+      summary: List current user's alerts
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [DRAFT, ACTIVE, PAUSED, TRIGGERED, WAIT_REARM, COMPLETED, EXPIRED]
+      responses:
+        '200':
+          description: Alerts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: post_v1_alerts
+      tags: [Alerts]
+      summary: Create a price alert
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAlertRequest'
+      responses:
+        '201':
+          description: Alert created; activation can remain PENDING briefly
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /v1/alerts/{alert_id}:
+    parameters:
+      - $ref: '#/components/parameters/AlertId'
+    patch:
+      operationId: patch_v1_alerts_alert_id
+      tags: [Alerts]
+      summary: Edit an alert using optimistic concurrency
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAlertRequest'
+      responses:
+        '200':
+          description: Alert updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: delete_v1_alerts_alert_id
+      tags: [Alerts]
+      summary: Soft-delete an alert
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/alerts/{alert_id}/pause:
+    post:
+      operationId: post_v1_alerts_alert_id_pause
+      tags: [Alerts]
+      summary: Pause an alert idempotently
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Current paused state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/alerts/{alert_id}/resume:
+    post:
+      operationId: post_v1_alerts_alert_id_resume
+      tags: [Alerts]
+      summary: Resume an alert idempotently
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Current active state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/me/devices:
+    post:
+      operationId: post_v1_me_devices
+      tags: [Devices]
+      summary: Register or refresh an installation and push endpoints
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeviceRequest'
+      responses:
+        '201':
+          description: Device registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/me/entitlements:
+    get:
+      operationId: get_v1_me_entitlements
+      tags: [Entitlements]
+      summary: Get current fee tier and entitlements
+      responses:
+        '200':
+          description: Effective entitlements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntitlementsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/auth/wallet/challenges:
+    post:
+      operationId: post_v1_auth_wallet_challenges
+      tags: [Trading]
+      summary: Create a one-time wallet signature challenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WalletChallengeRequest'
+      responses:
+        '201':
+          description: Challenge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletChallengeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/auth/wallet/verify:
+    post:
+      operationId: post_v1_auth_wallet_verify
+      tags: [Trading]
+      summary: Verify a wallet signature and bind the wallet
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WalletVerifyRequest'
+      responses:
+        '200':
+          description: Wallet verified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletVerifyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/ai/runs:
+    post:
+      operationId: post_v1_ai_runs
+      tags: [AI]
+      summary: Create an analyst run
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAiRunRequest'
+      responses:
+        '202':
+          description: Run queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiRunResponse'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /v1/ai/runs/{run_id}:
+    get:
+      operationId: get_v1_ai_runs_run_id
+      tags: [AI]
+      summary: Get an analyst run
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Run status or report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiRunResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/payment-quotes:
+    post:
+      operationId: post_v1_payment_quotes
+      tags: [Entitlements]
+      summary: Create a fixed on-chain payment quote
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentQuoteRequest'
+      responses:
+        '201':
+          description: Quote with fixed chain, token, recipient and expiry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentQuoteResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/payments:
+    post:
+      operationId: post_v1_payments
+      tags: [Entitlements]
+      summary: Submit a transaction hash for asynchronous verification
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitPaymentRequest'
+      responses:
+        '202':
+          description: Payment pending chain confirmation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/order-intents:
+    post:
+      operationId: post_v1_order_intents
+      tags: [Trading]
+      summary: Prepare a non-custodial order payload
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderIntentRequest'
+      responses:
+        '201':
+          description: Awaiting wallet signature
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderIntentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/orders:
+    post:
+      operationId: post_v1_orders
+      tags: [Trading]
+      summary: Submit a signed order intent
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitOrderRequest'
+      responses:
+        '202':
+          description: Submitted or status is unknown and must be reconciled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/stream/ticket:
+    post:
+      operationId: post_v1_stream_ticket
+      tags: [Markets]
+      summary: Create a short-lived WebSocket ticket
+      responses:
+        '201':
+          description: One-time ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, request_id]
+                properties:
+                  data:
+                    type: object
+                    required: [ticket, expires_at]
+                    properties:
+                      ticket:
+                        type: string
+                      expires_at:
+                        type: string
+                        format: date-time
+                  request_id:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    InstrumentIds:
+      name: instrument_ids
+      in: query
+      required: true
+      schema:
+        type: string
+      description: Comma-separated instrument IDs
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema:
+        type: string
+    AlertId:
+      name: alert_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Invalid request or precision
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Version, state or idempotency conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unprocessable:
+      description: Business rule prevents the operation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error, request_id]
+      properties:
+        error:
+          type: object
+          required: [code, message, retryable]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+            retryable:
+              type: boolean
+        request_id:
+          type: string
+    Quote:
+      type: object
+      required: [instrument_id, venue, symbol, price_type, price, source_ts, received_at, quality]
+      properties:
+        instrument_id: {type: string}
+        venue: {type: string}
+        symbol: {type: string}
+        market_type: {type: string}
+        price_type: {type: string, enum: [LAST, MARK, INDEX]}
+        price: {type: string, pattern: '^[0-9]+(\\.[0-9]+)?$'}
+        source_ts: {type: string, format: date-time}
+        received_at: {type: string, format: date-time}
+        age_ms: {type: integer, minimum: 0}
+        quality: {type: string, enum: [FRESH, STALE, GAP, SUSPECT]}
+        sequence: {type: string}
+    QuoteListResponse:
+      type: object
+      required: [items, server_time, request_id]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Quote'}
+        server_time: {type: string, format: date-time}
+        request_id: {type: string}
+    CreateAlertRequest:
+      type: object
+      required: [instrument_id, price_type, direction, trigger_mode, threshold, repeat_policy]
+      properties:
+        instrument_id: {type: string}
+        price_type: {type: string, enum: [LAST, MARK, INDEX]}
+        direction: {type: string, enum: [ABOVE, BELOW]}
+        trigger_mode: {type: string, enum: [CROSS, LEVEL_ONCE]}
+        threshold: {type: string}
+        repeat_policy: {type: string, enum: [ONCE, REARM]}
+        hysteresis_bps: {type: integer, minimum: 0, maximum: 50000, default: 0}
+        cooldown_seconds: {type: integer, minimum: 0, maximum: 2592000, default: 300}
+        expires_at: {type: [string, 'null'], format: date-time}
+        delivery_policy:
+          type: object
+          properties:
+            mode: {type: string, enum: [ALL_DEVICES, SELECTED_DEVICES]}
+            quiet_hours: {type: string, enum: [DEFER, SILENT, ALLOW]}
+    UpdateAlertRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateAlertRequest'
+      type: object
+      properties:
+        expected_version: {type: integer, minimum: 1}
+    Alert:
+      type: object
+      required: [id, status, activation_status, version, cycle_no]
+      properties:
+        id: {type: string}
+        status: {type: string}
+        activation_status: {type: string, enum: [PENDING, READY, STALE, ERROR]}
+        version: {type: integer}
+        cycle_no: {type: integer}
+        baseline_price: {type: [string, 'null']}
+        semantic_text: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    AlertResponse:
+      type: object
+      required: [data, request_id]
+      properties:
+        data: {$ref: '#/components/schemas/Alert'}
+        request_id: {type: string}
+    AlertListResponse:
+      type: object
+      required: [items, request_id]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Alert'}
+        next_cursor: {type: [string, 'null']}
+        has_more: {type: boolean}
+        request_id: {type: string}
+    RegisterDeviceRequest:
+      type: object
+      required: [platform, install_id, app_version, timezone]
+      properties:
+        platform: {type: string, enum: [ios, android, windows, macos, web]}
+        install_id: {type: string}
+        app_version: {type: string}
+        timezone: {type: string}
+        notification_endpoints:
+          type: array
+          items:
+            type: object
+            required: [channel, token, permission]
+            properties:
+              channel: {type: string, enum: [APNS, FCM, WEB_PUSH, WINDOWS, MACOS]}
+              token: {type: string}
+              permission: {type: string, enum: [AUTHORIZED, DENIED, UNKNOWN]}
+    Device:
+      type: object
+      required: [device_id, status]
+      properties:
+        device_id: {type: string}
+        status: {type: string, enum: [ACTIVE, REVOKED]}
+        notification_endpoints:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string}
+              channel: {type: string}
+              status: {type: string}
+    DeviceResponse:
+      type: object
+      required: [data, request_id]
+      properties:
+        data: {$ref: '#/components/schemas/Device'}
+        request_id: {type: string}
+    EntitlementsResponse:
+      type: object
+      required: [data, request_id]
+      properties:
+        data:
+          type: object
+          properties:
+            fee_tier:
+              type: object
+              properties:
+                code: {type: string}
+                rolling_window_days: {type: integer}
+                notional_usd: {type: string}
+                calculated_at: {type: string, format: date-time}
+                policy_version: {type: string}
+            entitlements:
+              type: array
+              items:
+                type: object
+                properties:
+                  code: {type: string}
+                  analyst_id: {type: [string, 'null']}
+                  remaining: {type: string}
+                  unit: {type: string}
+                  expires_at: {type: [string, 'null'], format: date-time}
+                  source: {type: string}
+            limitations:
+              type: array
+              items: {type: string}
+        request_id: {type: string}
+    CreateAiRunRequest:
+      type: object
+      required: [analyst_id, instrument_id, lookback, question]
+      properties:
+        analyst_id: {type: string}
+        instrument_id: {type: string}
+        lookback: {type: string}
+        question: {type: string, maxLength: 4000}
+        client_context:
+          type: object
+          additionalProperties: true
+    AiRunResponse:
+      type: object
+      required: [data, request_id]
+      properties:
+        data:
+          type: object
+          required: [run_id, status]
+          properties:
+            run_id: {type: string}
+            status: {type: string, enum: [QUEUED, RUNNING, COMPLETED, FAILED, TIMED_OUT, CANCELED]}
+            analyst_version: {type: string}
+            reserved_credits: {type: string}
+            actual_credits: {type: string}
+            estimated_latency_seconds: {type: integer}
+            input_snapshot_at: {type: string, format: date-time}
+            cost: {type: object, additionalProperties: true}
+            report: {type: [object, 'null'], additionalProperties: true}
+        request_id: {type: string}
+    WalletChallengeRequest:
+      type: object
+      required: [chain_id, address, purpose]
+      properties:
+        chain_id: {type: string}
+        address: {type: string}
+        purpose: {type: string, enum: [BIND_WALLET, SIGN_IN]}
+    WalletChallengeResponse:
+      type: object
+      required: [data, request_id]
+      properties:
+        data:
+          type: object
+          required: [challenge_id, domain, uri, chain_id, nonce, issued_at, expiration_time, message]
+          properties:
+            challenge_id: {type: string}
+            domain: {type: string}
+            uri: {type: string, format: uri}
+            chain_id: {type: string}
+            nonce: {type: string}
+            issued_at: {type: string, format: date-time}
+            expiration_time: {type: string, format: date-time}
+            message: {type: string}
+        request_id: {type: string}
+    WalletVerifyRequest:
+      type: object
+      required: [challenge_id, address, signature]
+      properties:
+        challenge_id: {type: string}
+        address: {type: string}
+        signature: {type: string}
+        create_session: {type: boolean, default: true}
+    WalletVerifyResponse:
+      type: object
+      required: [data, request_id]
+      properties:
+        data:
+          type: object
+          required: [wallet_id, status]
+          properties:
+            wallet_id: {type: string}
+            status: {type: string, enum: [VERIFIED, REJECTED]}
+            access_token: {type: string}
+            refresh_token: {type: string}
+        request_id: {type: string}
+    CreatePaymentQuoteRequest:
+      type: object
+      required: [purpose, analyst_id, chain_id, token_contract, currency]
+      properties:
+        purpose: {type: string, enum: [UNLOCK_ANALYST, BUY_AI_CREDITS, PAY_PLATFORM_FEE]}
+        analyst_id: {type: [string, 'null']}
+        chain_id: {type: string}
+        token_contract: {type: string}
+        currency: {type: string}
+    PaymentQuoteResponse:
+      type: object
+      required: [data, request_id]
+      properties:
+        data:
+          type: object
+          required: [quote_id, purpose, chain_id, token_contract, atomic_amount, recipient, nonce, expires_at]
+          properties:
+            quote_id: {type: string}
+            purpose: {type: string}
+            chain_id: {type: string}
+            token_contract: {type: string}
+            atomic_amount: {type: string}
+            display_amount: {type: string}
+            recipient: {type: string}
+            nonce: {type: string}
+            expires_at: {type: string, format: date-time}
+            policy_version: {type: string}
+        request_id: {type: string}
+    SubmitPaymentRequest:
+      type: object
+      required: [quote_id, tx_hash]
+      properties:
+        quote_id: {type: string}
+        tx_hash: {type: string}
+    PaymentResponse:
+      type: object
+      required: [data, request_id]
+      properties:
+        data:
+          type: object
+          required: [payment_id, status, quote_id, entitlement_status]
+          properties:
+            payment_id: {type: string}
+            status: {type: string, enum: [PENDING_CONFIRMATION, CONFIRMED, EXCEPTION_REVIEW, REORGED, REFUNDED]}
+            quote_id: {type: string}
+            entitlement_status: {type: string, enum: [NOT_GRANTED, GRANTED, FROZEN]}
+            required_confirmations: {type: integer, minimum: 0}
+        request_id: {type: string}
+    CreateOrderIntentRequest:
+      type: object
+      required: [wallet_id, venue, instrument_id, side, order_type, quantity]
+      properties:
+        wallet_id: {type: string}
+        venue: {type: string}
+        instrument_id: {type: string}
+        side: {type: string, enum: [BUY, SELL]}
+        order_type: {type: string, enum: [MARKET, LIMIT]}
+        quantity: {type: string}
+        limit_price: {type: [string, 'null']}
+        slippage_bps: {type: string}
+        reduce_only: {type: boolean, default: false}
+    OrderIntentResponse:
+      type: object
+      required: [data, request_id]
+      properties:
+        data:
+          type: object
+          properties:
+            intent_id: {type: string}
+            status: {type: string, enum: [AWAITING_SIGNATURE, EXPIRED, REJECTED]}
+            expires_at: {type: string, format: date-time}
+            payload_hash: {type: string}
+            signing_payload: {type: object, additionalProperties: true}
+            fees: {type: object, additionalProperties: true}
+        request_id: {type: string}
+    SubmitOrderRequest:
+      type: object
+      required: [intent_id, signature]
+      properties:
+        intent_id: {type: string}
+        signature: {type: string}
+    OrderResponse:
+      type: object
+      required: [data, request_id]
+      properties:
+        data:
+          type: object
+          properties:
+            order_id: {type: string}
+            status: {type: string, enum: [SUBMITTING, OPEN, PARTIALLY_FILLED, FILLED, SUBMISSION_UNKNOWN, REJECTED, CANCELED]}
+            venue_order_id: {type: [string, 'null']}
+            next_action: {type: [string, 'null']}
+        request_id: {type: string}
